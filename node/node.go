@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
+	"github.com/asaskevich/EventBus"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/venus-wallet/api/remotecli/httpparse"
 	"github.com/filecoin-project/venus-wallet/config"
@@ -106,7 +108,7 @@ func NewNodeClient(cnf *config.StrategyConfig) (*NodeClient, error) {
 		return EmptyNodeClient, nil
 	}
 	if cnf.NodeURL == core.StringEmpty {
-		return nil, errors.New("node url can not be empty when level is SLMethod")
+		return nil, errors.New("nod/ip4e url can not be empty when level is SLMethod")
 	}
 	ai, err := httpparse.ParseApiInfo(cnf.NodeURL)
 	if err != nil {
@@ -124,4 +126,8 @@ func NewNodeClient(cnf *config.StrategyConfig) (*NodeClient, error) {
 	cli.Cancel = closer
 	log.Info("node client initialize successfully")
 	return cli, nil
+}
+
+func NewEventBus() EventBus.Bus {
+	return EventBus.New()
 }

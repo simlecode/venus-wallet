@@ -7,6 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"strings"
+
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/venus-wallet/cli/helper"
 	"github.com/filecoin-project/venus-wallet/core"
@@ -14,9 +18,6 @@ import (
 	"github.com/howeyc/gopass"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/xerrors"
-	"io/ioutil"
-	"os"
-	"strings"
 )
 
 var walletSetPassword = &cli.Command{
@@ -24,6 +25,12 @@ var walletSetPassword = &cli.Command{
 	Aliases: []string{"setpwd"},
 	Usage:   "Store a credential for a keystore file",
 	Action: func(cctx *cli.Context) error {
+		api, closer, err := helper.GetFullAPI(cctx)
+		if err != nil {
+			return err
+		}
+		defer closer()
+
 		pw, err := gopass.GetPasswdPrompt("Password:", true, os.Stdin, os.Stdout)
 		if err != nil {
 			return err
@@ -35,11 +42,7 @@ var walletSetPassword = &cli.Command{
 		if !bytes.Equal(pw, pw2) {
 			return errors.New("the input passwords are inconsistent")
 		}
-		api, closer, err := helper.GetFullAPI(cctx)
-		if err != nil {
-			return err
-		}
-		defer closer()
+
 		ctx := helper.ReqContext(cctx)
 		err = api.SetPassword(ctx, string(pw2))
 		if err != nil {
@@ -54,15 +57,17 @@ var walletUnlock = &cli.Command{
 	Name:  "unlock",
 	Usage: "unlock the wallet and release private key",
 	Action: func(cctx *cli.Context) error {
-		pw, err := gopass.GetPasswdPrompt("Password:", true, os.Stdin, os.Stdout)
-		if err != nil {
-			return err
-		}
 		api, closer, err := helper.GetFullAPI(cctx)
 		if err != nil {
 			return err
 		}
 		defer closer()
+
+		pw, err := gopass.GetPasswdPrompt("Password:", true, os.Stdin, os.Stdout)
+		if err != nil {
+			return err
+		}
+
 		ctx := helper.ReqContext(cctx)
 		err = api.Unlock(ctx, string(pw))
 		if err != nil {
@@ -73,19 +78,21 @@ var walletUnlock = &cli.Command{
 	},
 }
 
-var walletlock = &cli.Command{
+var walletLock = &cli.Command{
 	Name:  "lock",
 	Usage: "Restrict the use of secret keys after locking wallet",
 	Action: func(cctx *cli.Context) error {
-		pw, err := gopass.GetPasswdPrompt("Password:", true, os.Stdin, os.Stdout)
-		if err != nil {
-			return err
-		}
 		api, closer, err := helper.GetFullAPI(cctx)
 		if err != nil {
 			return err
 		}
 		defer closer()
+
+		pw, err := gopass.GetPasswdPrompt("Password:", true, os.Stdin, os.Stdout)
+		if err != nil {
+			return err
+		}
+
 		ctx := helper.ReqContext(cctx)
 		err = api.Lock(ctx, string(pw))
 		if err != nil {
@@ -97,9 +104,8 @@ var walletlock = &cli.Command{
 }
 
 var walletLockState = &cli.Command{
-	Name:    "lockState",
-	Aliases: []string{"lockstate"},
-	Usage:   "unlock the wallet and release private key",
+	Name:  "lock-state",
+	Usage: "unlock the wallet and release private key",
 	Action: func(cctx *cli.Context) error {
 		api, closer, err := helper.GetFullAPI(cctx)
 		if err != nil {
@@ -126,7 +132,7 @@ var walletNew = &cli.Command{
 		if t == "" {
 			t = core.KTSecp256k1
 		}
-		api, closer, err := helper.GetFullAPIWithPWD(cctx)
+		api, closer, err := helper.GetFullAPI(cctx)
 		if err != nil {
 			return err
 		}
@@ -146,7 +152,7 @@ var walletList = &cli.Command{
 	Aliases: []string{"ls"},
 	Usage:   "List wallet address",
 	Action: func(cctx *cli.Context) error {
-		api, closer, err := helper.GetFullAPIWithPWD(cctx)
+		api, closer, err := helper.GetFullAPI(cctx)
 		if err != nil {
 			return err
 		}
@@ -176,13 +182,21 @@ var walletExport = &cli.Command{
 		if err != nil {
 			return err
 		}
-
-		api, closer, err := helper.GetFullAPIWithPWD(cctx)
+		api, closer, err := helper.GetFullAPI(cctx)
 		if err != nil {
 			return err
 		}
 		defer closer()
+
+		pw, err := gopass.GetPasswdPrompt("Password:", true, os.Stdin, os.Stdout)
+		if err != nil {
+			return err
+		}
+
 		ctx := helper.ReqContext(cctx)
+		if err := api.VerifyPassword(ctx, string(pw)); err != nil {
+			return err
+		}
 		ki, err := api.WalletExport(ctx, addr)
 		if err != nil {
 			return err
@@ -222,6 +236,9 @@ var walletImport = &cli.Command{
 		} else {
 			fdata, err := ioutil.ReadFile(cctx.Args().First())
 			if err != nil {
+				if strings.Contains(err.Error(), "no such file or directory") {
+					return xerrors.New("input whether it is a file, if not, exec `./venus-wallet import` and then `enter` ")
+				}
 				return err
 			}
 			inpdata = fdata
@@ -267,7 +284,7 @@ var walletImport = &cli.Command{
 			return fmt.Errorf("unrecognized format: %s", cctx.String("format"))
 		}
 
-		api, closer, err := helper.GetFullAPIWithPWD(cctx)
+		api, closer, err := helper.GetFullAPI(cctx)
 		if err != nil {
 			return err
 		}
@@ -284,8 +301,17 @@ var walletImport = &cli.Command{
 }
 
 var walletSign = &cli.Command{
-	Name:      "sign",
-	Usage:     "sign a message",
+	Name:  "sign",
+	Usage: "sign a message",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "msg-type",
+			Value: string(core.MTUnknown),
+		},
+		&cli.StringFlag{
+			Name: "extra",
+		},
+	},
 	ArgsUsage: "<signing address> <hexMessage>",
 	Action: func(cctx *cli.Context) error {
 		if !cctx.Args().Present() || cctx.NArg() != 2 {
@@ -303,13 +329,27 @@ var walletSign = &cli.Command{
 			return err
 		}
 
-		api, closer, err := helper.GetFullAPIWithPWD(cctx)
+		pw, err := gopass.GetPasswdPrompt("Password:", true, os.Stdin, os.Stdout)
+		if err != nil {
+			return err
+		}
+
+		api, closer, err := helper.GetFullAPI(cctx)
 		if err != nil {
 			return err
 		}
 		defer closer()
 		ctx := helper.ReqContext(cctx)
-		sig, err := api.WalletSign(ctx, addr, msg, core.MsgMeta{})
+		if err := api.VerifyPassword(ctx, string(pw)); err != nil {
+			return err
+		}
+		msgMeta := core.MsgMeta{
+			Type: core.MsgType(cctx.String("msg-type")),
+		}
+		if cctx.IsSet("extra") {
+			msgMeta.Extra = []byte(cctx.String("extra"))
+		}
+		sig, err := api.WalletSign(ctx, addr, msg, msgMeta)
 		if err != nil {
 			return err
 		}
@@ -332,12 +372,21 @@ var walletDel = &cli.Command{
 			return err
 		}
 
-		api, closer, err := helper.GetFullAPIWithPWD(cctx)
+		api, closer, err := helper.GetFullAPI(cctx)
 		if err != nil {
 			return err
 		}
 		defer closer()
+
+		pw, err := gopass.GetPasswdPrompt("Password:", true, os.Stdin, os.Stdout)
+		if err != nil {
+			return err
+		}
+
 		ctx := helper.ReqContext(cctx)
+		if err := api.VerifyPassword(ctx, string(pw)); err != nil {
+			return err
+		}
 		if err = api.WalletDelete(ctx, addr); err != nil {
 			return err
 		}

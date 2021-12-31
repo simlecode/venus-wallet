@@ -2,17 +2,23 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"github.com/filecoin-project/go-address"
+	"os"
+	"strings"
+
+	"github.com/urfave/cli/v2"
+	"go.opencensus.io/trace"
+	"golang.org/x/xerrors"
+
 	localCli "github.com/filecoin-project/venus-wallet/cli"
-	"github.com/filecoin-project/venus-wallet/cli/helper"
 	main2 "github.com/filecoin-project/venus-wallet/cmd"
 	loclog "github.com/filecoin-project/venus-wallet/log"
 	"github.com/filecoin-project/venus-wallet/middleware"
 	"github.com/filecoin-project/venus-wallet/version"
-	"github.com/prometheus/common/log"
-	"github.com/urfave/cli/v2"
-	"go.opencensus.io/trace"
-	"os"
 )
+
+var errConnectRefused = xerrors.New("connection refused")
 
 func main() {
 	loclog.SetupLogLevels()
@@ -43,7 +49,7 @@ func main() {
 
 	app := &cli.App{
 		Name:    "venus remote-wallet",
-		Usage:   "",
+		Usage:   "./venus-wallet ",
 		Version: version.UserVersion,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -52,6 +58,22 @@ func main() {
 				Hidden:  true,
 				Value:   "~/.venus_wallet",
 			},
+			&cli.StringFlag{Name: "nettype",
+				EnvVars: []string{"VENUS_ADDRESS_TYPE"},
+				Value:   "calibnet",
+				Usage:   "should be mainnet/calibnet",
+			},
+		},
+		Before: func(c *cli.Context) error {
+			address.CurrentNetwork = address.Mainnet
+			if c.String("nettype") == "mainnet" {
+				address.CurrentNetwork = address.Mainnet
+			} else if c.String("nettype") == "calibnet" {
+				address.CurrentNetwork = address.Testnet
+			} else {
+				return fmt.Errorf("nettype should be 'mainnet' or 'calibnet'")
+			}
+			return nil
 		},
 
 		Commands: append(local, localCli.Commands...),
@@ -64,11 +86,10 @@ func main() {
 			Code:    trace.StatusCodeFailedPrecondition,
 			Message: err.Error(),
 		})
-		_, ok := err.(*helper.ErrCmdFailed)
-		if ok {
-			log.Debugf("%+v", err)
+		if strings.Contains(err.Error(), errConnectRefused.Error()) {
+			fmt.Printf("%v. %s\n", err, "Is the venus-wallet running?")
 		} else {
-			log.Warnf("%+v", err)
+			fmt.Println(err)
 		}
 		os.Exit(1)
 	}

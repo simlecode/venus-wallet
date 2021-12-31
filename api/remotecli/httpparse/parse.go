@@ -1,60 +1,41 @@
 package httpparse
 
 import (
+	"github.com/ipfs-force-community/venus-common-utils/apiinfo"
+	"golang.org/x/xerrors"
 	"net/http"
-	"regexp"
 	"strings"
-
-	"github.com/multiformats/go-multiaddr"
-	manet "github.com/multiformats/go-multiaddr/net"
-)
-
-var (
-	regJWTToken = regexp.MustCompile("[a-zA-Z0-9\\-_]{5,}\\.[a-zA-Z0-9\\-_]{5,}\\.[a-zA-Z0-9\\-_]{5,}")                                                                                                                            //nolint
-	regUUID     = regexp.MustCompile("[0-9a-fA-F]{8}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{12}")                                                                                                        //nolint
-	regIPv4     = regexp.MustCompile("/ip4/(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/tcp/[0-9]{4,5}/http") //nolint
 )
 
 const (
-	ServiceToken        = "Authorization"
-	WalletStrategyToken = "StrategyToken"
+	ServiceToken = "Authorization"
 )
 
 // APIInfo parse URL string to
 type APIInfo struct {
-	Addr          multiaddr.Multiaddr
-	Token         []byte
-	StrategyToken []byte
+	Addr  string
+	Token []byte
 }
 
 func ParseApiInfo(s string) (*APIInfo, error) {
-	token := []byte(regJWTToken.FindString(s))
-	strategyToken := []byte(regUUID.FindString(s))
-	addr := regIPv4.FindString(s)
-	apima, err := multiaddr.NewMultiaddr(addr)
-	if err != nil {
-		return nil, err
+	sep := strings.Split(s, ":")
+	if len(sep) != 2 {
+		return nil, xerrors.Errorf("invalidate api info string %s", s)
 	}
 	return &APIInfo{
-		Addr:          apima,
-		Token:         token,
-		StrategyToken: strategyToken,
+		Addr:  sep[1],
+		Token: []byte(sep[0]),
 	}, nil
 }
 
 func (a APIInfo) DialArgs() (string, error) {
-	_, addr, err := manet.DialArgs(a.Addr)
-	if strings.HasPrefix(addr, "0.0.0.0:") {
-		addr = "127.0.0.1:" + addr[8:]
-	}
-	return "ws://" + addr + "/rpc/v0", err
+	return apiinfo.DialArgs(a.Addr, "v0")
 }
 
 func (a APIInfo) AuthHeader() http.Header {
 	if len(a.Token) != 0 {
 		headers := http.Header{}
 		headers.Add(ServiceToken, "Bearer "+string(a.Token))
-		headers.Add(WalletStrategyToken, string(a.StrategyToken))
 		return headers
 	}
 	return nil

@@ -3,13 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"github.com/filecoin-project/go-jsonrpc"
-	"github.com/filecoin-project/venus-wallet/api"
-	"github.com/filecoin-project/venus-wallet/api/permission"
-	"github.com/filecoin-project/venus-wallet/api/remotecli/httpparse"
-	"github.com/filecoin-project/venus-wallet/build"
 	"github.com/filecoin-project/venus-wallet/core"
-	"golang.org/x/xerrors"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -17,8 +11,15 @@ import (
 	"strings"
 	"syscall"
 
+	jsonrpc "github.com/filecoin-project/go-jsonrpc"
+	"github.com/filecoin-project/venus-wallet/api"
+	"github.com/filecoin-project/venus-wallet/api/permission"
+	"github.com/filecoin-project/venus-wallet/api/remotecli/httpparse"
+	"github.com/filecoin-project/venus-wallet/build"
+	"golang.org/x/xerrors"
+
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/multiformats/go-multiaddr"
+	multiaddr "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 )
 
@@ -40,7 +41,7 @@ func CorsMiddleWare(next http.Handler) http.Handler {
 }
 
 // Start the interface service and bind the address
-func ServeRPC(a api.IFullAPI, stop build.StopFunc, addr multiaddr.Multiaddr) error {
+func ServeRPC(a api.IFullAPI, stop build.StopFunc, addr string) error {
 	rpcServer := jsonrpc.NewServer()
 	rpcServer.Register("Filecoin", api.PermissionedFullAPI(a))
 	ah := &Handler{
@@ -48,7 +49,11 @@ func ServeRPC(a api.IFullAPI, stop build.StopFunc, addr multiaddr.Multiaddr) err
 		Next:   rpcServer.ServeHTTP,
 	}
 	http.Handle("/rpc/v0", CorsMiddleWare(ah))
-	lst, err := manet.Listen(addr)
+	ma, err := multiaddr.NewMultiaddr(addr)
+	if err != nil {
+		return nil
+	}
+	lst, err := manet.Listen(ma)
 	if err != nil {
 		return xerrors.Errorf("could not listen: %w", err)
 	}
@@ -78,9 +83,6 @@ type Handler struct {
 // JWT verify
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if r.RemoteAddr[:len("127.0.0.1")] == "127.0.0.1" {
-		ctx = permission.WithIPPerm(ctx)
-	}
 	token := r.Header.Get(httpparse.ServiceToken)
 	if token == "" {
 		token = r.FormValue("token")
@@ -96,6 +98,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		token = strings.TrimPrefix(token, "Bearer ")
 
+		tokenStrategy := strings.Split(token, "___") //just for compatible with lotus apiinfo parser
+		if len(tokenStrategy) == 2 {
+			ctx = context.WithValue(ctx, core.CtxKeyStrategy, tokenStrategy[1])
+		} else {
+			ctx = context.WithValue(ctx, core.CtxKeyStrategy, "")
+		}
+		token = tokenStrategy[0]
+
 		allow, err := h.Verify(ctx, token)
 		if err != nil {
 			log.Warnf("JWT Verification failed: %s", err)
@@ -105,7 +115,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		ctx = permission.WithPerm(ctx, allow)
 	}
-	strategyToken := r.Header.Get(httpparse.WalletStrategyToken)
-	ctx = context.WithValue(ctx, core.CtxKeyStrategy, strategyToken)
+
 	h.Next(w, r.WithContext(ctx))
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"log"
+
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/venus-wallet/api"
 	"github.com/filecoin-project/venus-wallet/build"
@@ -14,7 +16,6 @@ import (
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
-	"log"
 )
 
 // this package for debug
@@ -46,7 +47,7 @@ func main() {
 			address.CurrentNetwork = address.Testnet
 		}),
 		build.FullAPIOpt(&fullAPI),
-		build.WalletOpt(r.Config()),
+		build.WalletOpt(r, ""),
 		build.CommonOpt(secret),
 		build.Override(new(build.NetworkName), build.NetworkName("main net")),
 	)
@@ -69,7 +70,7 @@ func main() {
 		log.Fatalf("getting api endpoint: %s", err)
 	}
 
-	log.Println(endpoint.String(), stop)
+	log.Println(endpoint, stop)
 	log.Println("Pre-preparation completed")
 	// TODO: properly parse api endpoint (or make it a URL)
 	// Use serveRPC method to perform local CLI debugging

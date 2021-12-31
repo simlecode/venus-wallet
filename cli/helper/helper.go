@@ -2,7 +2,13 @@ package helper
 
 import (
 	"context"
-	"errors"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"github.com/filecoin-project/go-jsonrpc"
 	"github.com/filecoin-project/venus-wallet/api"
 	"github.com/filecoin-project/venus-wallet/api/remotecli"
@@ -11,14 +17,11 @@ import (
 	"github.com/filecoin-project/venus-wallet/filemgr"
 	"github.com/howeyc/gopass"
 	"github.com/mitchellh/go-homedir"
+	"github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/prometheus/common/log"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/xerrors"
-	"net/http"
-	"os"
-	"os/signal"
-	"strconv"
-	"syscall"
 )
 
 const (
@@ -61,19 +64,9 @@ func GetAPIInfo(ctx *cli.Context) (httpparse.APIInfo, error) {
 		log.Warnf("Couldn't load CLI token, capabilities may be limited: %v", err)
 	}
 
-	strategyToken := make([]byte, 0)
-	if pwd, ok := ctx.Context.Value(ctxPWD).([]byte); ok && len(pwd) > 0 {
-		tk, err := r.APIStrategyToken(string(pwd))
-		if err != nil {
-			return httpparse.APIInfo{}, xerrors.Errorf("could not convert strategy token:%w", err)
-		}
-		strategyToken = []byte(tk)
-	}
-
 	return httpparse.APIInfo{
-		Addr:          ma,
-		Token:         token,
-		StrategyToken: strategyToken,
+		Addr:  ma,
+		Token: token,
 	}, nil
 }
 
@@ -83,12 +76,33 @@ func GetRawAPI(ctx *cli.Context) (string, http.Header, error) {
 		return "", nil, xerrors.Errorf("could not get API info: %w", err)
 	}
 
+	if err := dial(ainfo.Addr); err != nil {
+		return "", nil, err
+	}
+
 	addr, err := ainfo.DialArgs()
 	if err != nil {
 		return "", nil, xerrors.Errorf("could not get DialArgs: %w", err)
 	}
 
 	return addr, ainfo.AuthHeader(), nil
+}
+
+func dial(addr string) error {
+	ma, err := multiaddr.NewMultiaddr(addr)
+	if err == nil {
+		_, addr, err := manet.DialArgs(ma)
+		if err != nil {
+			return err
+		}
+		dialer := net.Dialer{
+			Timeout: time.Second * 2,
+		}
+		_, err = dialer.Dial("tcp", addr)
+		return err
+	}
+
+	return nil
 }
 
 func GetAPI(ctx *cli.Context) (common.ICommon, jsonrpc.ClientCloser, error) {
@@ -108,11 +122,15 @@ func GetFullAPI(ctx *cli.Context) (api.IFullAPI, jsonrpc.ClientCloser, error) {
 }
 
 func GetFullAPIWithPWD(ctx *cli.Context) (api.IFullAPI, jsonrpc.ClientCloser, error) {
-	err := withPWD(ctx)
+	addr, headers, err := GetRawAPI(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	return GetFullAPI(ctx)
+	err = withPWD(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return remotecli.NewFullNodeRPC(ctx.Context, addr, headers)
 }
 
 func DaemonContext(cctx *cli.Context) context.Context {
@@ -146,20 +164,6 @@ func withPWD(cctx *cli.Context) error {
 	}
 	cctx.Context = context.WithValue(cctx.Context, ctxPWD, pwd)
 	return nil
-}
-
-func ReqFromTo(cctx *cli.Context, idx int) (from, to int, err error) {
-	fromStr := cctx.Args().Get(idx)
-	toStr := cctx.Args().Get(idx + 1)
-	f, err := strconv.ParseInt(fromStr, 10, 32)
-	if err != nil {
-		return 0, 0, errors.New("from must be an int")
-	}
-	t, err := strconv.ParseInt(toStr, 10, 32)
-	if err != nil {
-		return 0, 0, errors.New("to must be an int")
-	}
-	return int(f), int(t), nil
 }
 
 //nolint

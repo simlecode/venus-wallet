@@ -2,14 +2,15 @@ package core
 
 import (
 	"encoding/binary"
+	"io"
+	"io/ioutil"
+
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/cbor"
 	"github.com/filecoin-project/go-state-types/crypto"
-	fcbor "github.com/fxamacker/cbor"
+	fcbor "github.com/fxamacker/cbor/v2"
 	"github.com/minio/blake2b-simd"
 	"golang.org/x/xerrors"
-	"io"
-	"io/ioutil"
 )
 
 const (
@@ -38,6 +39,8 @@ const (
 	MTClientDeal = MsgType("clientdeal")
 
 	MTProviderDealState = MsgType("providerdealstate")
+
+	MTVerifyAddress = MsgType("verifyaddress")
 )
 
 type DrawRandomParams struct {
@@ -70,7 +73,7 @@ func (dr *DrawRandomParams) SignBytes() ([]byte, error) {
 }
 
 func (dr *DrawRandomParams) MarshalCBOR(w io.Writer) error {
-	data, err := fcbor.Marshal(dr, fcbor.EncOptions{})
+	data, err := fcbor.Marshal(dr)
 	if err != nil {
 		return err
 	}

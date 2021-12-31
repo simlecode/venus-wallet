@@ -5,17 +5,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/filecoin-project/venus-wallet/common"
 	"github.com/filecoin-project/venus-wallet/config"
 	"github.com/filecoin-project/venus-wallet/core"
 	"github.com/filecoin-project/venus-wallet/crypto/aes"
-	"github.com/gbrlsnchs/jwt/v3"
+	jwt "github.com/gbrlsnchs/jwt/v3"
 	"github.com/google/uuid"
-	"github.com/mitchellh/go-homedir"
-	"github.com/multiformats/go-multiaddr"
-	"os"
-	"path/filepath"
-	"strings"
+	homedir "github.com/mitchellh/go-homedir"
 )
 
 var (
@@ -33,6 +33,10 @@ type FsRepo struct {
 
 type OverrideParams struct {
 	API string
+
+	GatewayAPI      []string
+	GatewayToken    string
+	SupportAccounts []string
 }
 
 var _ Repo = &FsRepo{}
@@ -91,13 +95,9 @@ func (fsr *FsRepo) Config() *config.Config {
 }
 
 // APIEndpoint returns endpoint of API in this repo
-func (fsr *FsRepo) APIEndpoint() (multiaddr.Multiaddr, error) {
+func (fsr *FsRepo) APIEndpoint() (string, error) {
 	strma := strings.TrimSpace(fsr.cnf.API.ListenAddress)
-	apima, err := multiaddr.NewMultiaddr(strma)
-	if err != nil {
-		return nil, err
-	}
-	return apima, nil
+	return strma, nil
 }
 
 func (fsr *FsRepo) APIToken() ([]byte, error) {

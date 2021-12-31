@@ -2,28 +2,33 @@ package cmd
 
 import (
 	"context"
-	"github.com/filecoin-project/go-address"
+
+	homedir "github.com/mitchellh/go-homedir"
+	cli "github.com/urfave/cli/v2"
+	"go.opencensus.io/stats"
+	"go.opencensus.io/stats/view"
+	"go.opencensus.io/tag"
+	"golang.org/x/xerrors"
+
 	"github.com/filecoin-project/venus-wallet/api"
 	"github.com/filecoin-project/venus-wallet/build"
 	"github.com/filecoin-project/venus-wallet/core"
 	"github.com/filecoin-project/venus-wallet/filemgr"
 	"github.com/filecoin-project/venus-wallet/middleware"
 	"github.com/filecoin-project/venus-wallet/version"
-	"github.com/mitchellh/go-homedir"
-	"github.com/urfave/cli/v2"
-	"go.opencensus.io/stats"
-	"go.opencensus.io/stats/view"
-	"go.opencensus.io/tag"
-	"golang.org/x/xerrors"
 )
 
 type cmd = string
 
 const (
-	cmdNetwork cmd = "network"
-	cmdAPI     cmd = "api"
-	cmdRepo    cmd = "repo"
-	//cmdKeyStore cmd = "keystore"
+	cmdNetType cmd = "nettype"
+	// cmdAPI     cmd = "api"
+	cmdRepo cmd = "repo"
+	// cmdKeyStore cmd = "keystore"
+	cmdPwd             cmd = "password"
+	cmdGatewayAPI      cmd = "gateway-api"
+	cmdGatewayToken    cmd = "gateway-token"
+	cmdSupportAccounts cmd = "support-accounts"
 )
 
 // DaemonCmd is the `go-lotus daemon` command
@@ -31,8 +36,11 @@ var RunCmd = &cli.Command{
 	Name:  "run",
 	Usage: "Start a venus wallet process",
 	Flags: []cli.Flag{
-		&cli.StringFlag{Name: cmdAPI, Value: "5678"},
-		&cli.StringFlag{Name: cmdNetwork, Value: ""},
+		//	&cli.StringFlag{Name: cmdAPI, Value: "5678"},
+		&cli.StringFlag{Name: cmdPwd, Value: "", Aliases: []string{"pwd"}},
+		&cli.StringSliceFlag{Name: cmdGatewayAPI},
+		&cli.StringFlag{Name: cmdGatewayToken, Value: ""},
+		&cli.StringSliceFlag{Name: cmdSupportAccounts},
 	},
 	Action: func(cctx *cli.Context) error {
 		ctx, _ := tag.New(context.Background(), tag.Insert(middleware.Version, version.BuildVersion))
@@ -42,12 +50,10 @@ var RunCmd = &cli.Command{
 		} else {
 			log.Infof("wallet repo: %s", dir)
 		}
-		apiListen := ""
-		if cctx.IsSet("api") {
-			apiListen = "/ip4/0.0.0.0/tcp/" + cctx.String("api")
-		}
 		op := &filemgr.OverrideParams{
-			API: apiListen,
+			GatewayAPI:      cctx.StringSlice(cmdGatewayAPI),
+			GatewayToken:    cctx.String(cmdGatewayToken),
+			SupportAccounts: cctx.StringSlice(cmdSupportAccounts),
 		}
 		r, err := filemgr.NewFS(cctx.String(cmdRepo), op)
 		if err != nil {
@@ -61,19 +67,11 @@ var RunCmd = &cli.Command{
 		var fullAPI api.IFullAPI
 
 		stop, err := build.New(ctx,
-			build.Override(build.SetNet, func() {
-				address.CurrentNetwork = address.Mainnet
-			}),
 			build.FullAPIOpt(&fullAPI),
-			build.WalletOpt(r.Config()),
+			build.WalletOpt(r, cctx.String(cmdPwd)),
 			build.CommonOpt(secret),
-			build.ApplyIf(func(s *build.Settings) bool { return cctx.IsSet(cmdNetwork) },
-				build.Override(build.SetNet, func() {
-					if cctx.String(cmdNetwork) == "test" {
-						address.CurrentNetwork = address.Testnet
-					}
-				}),
-				build.Override(new(build.NetworkName), build.NetworkName(cctx.String(cmdNetwork)))),
+			build.ApplyIf(func(s *build.Settings) bool { return cctx.IsSet(cmdNetType) },
+				build.Override(new(build.NetworkName), build.NetworkName(cctx.String(cmdNetType)))),
 		)
 		if err != nil {
 			return xerrors.Errorf("initializing node: %w", err)

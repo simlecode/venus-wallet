@@ -1,16 +1,22 @@
 package filemgr
 
 import (
-	"github.com/filecoin-project/venus-wallet/config"
-	"github.com/filecoin-project/venus-wallet/core"
 	"os"
 	"path/filepath"
+
+	logging "github.com/ipfs/go-log/v2"
+	"golang.org/x/xerrors"
+
+	"github.com/filecoin-project/venus-wallet/config"
+	"github.com/filecoin-project/venus-wallet/core"
 )
+
+var log = logging.Logger("configmanager")
 
 func (fsr *FsRepo) defConfig() *config.Config {
 	return &config.Config{
 		API: &config.APIConfig{
-			ListenAddress: "/ip4/0.0.0.0/tcp/5678/http",
+			ListenAddress: "/ip4/127.0.0.1/tcp/5678/http",
 		},
 		DB: &config.DBConfig{
 			Conn:      filepath.Join(fsr.path, skKeyStore),
@@ -67,10 +73,28 @@ func (fsr *FsRepo) checkConfig(op *OverrideParams) error {
 			NodeURL: "",
 		}
 	}
+	if cnf.APIRegisterHub == nil {
+		cnf.APIRegisterHub = &config.APIRegisterHubConfig{
+			RegisterAPI:     []string{},
+			Token:           "",
+			SupportAccounts: []string{},
+		}
+	}
 	if op != nil {
 		// override
 		if op.API != core.StringEmpty {
 			cnf.API.ListenAddress = op.API
+		}
+		if len(op.GatewayAPI) != 0 {
+			cnf.APIRegisterHub.RegisterAPI = op.GatewayAPI
+			if len(op.GatewayToken) == 0 {
+				return xerrors.New("gateway token not set")
+			}
+			if len(op.SupportAccounts) == 0 {
+				log.Warn("no support accounts")
+			}
+			cnf.APIRegisterHub.Token = op.GatewayToken
+			cnf.APIRegisterHub.SupportAccounts = op.SupportAccounts
 		}
 	}
 	if reset {
@@ -101,4 +125,9 @@ func (fsr *FsRepo) loadConfig() (*config.Config, error) {
 }
 func (fsr *FsRepo) configPath() string {
 	return filepath.Join(fsr.path, skConfig)
+}
+
+func (fsr *FsRepo) AppendSupportAccount(newAccount string) error {
+	fsr.cnf.APIRegisterHub.SupportAccounts = append(fsr.cnf.APIRegisterHub.SupportAccounts, newAccount)
+	return config.CoverConfig(fsr.configPath(), fsr.cnf)
 }
